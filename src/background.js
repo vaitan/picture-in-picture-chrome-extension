@@ -1,59 +1,79 @@
-// Copyright 2018 Google LLC
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+let isUpdating = false;
 
-chrome.action.onClicked.addListener((tab) => {
-  chrome.scripting.executeScript({
-    target: { tabId: tab.id, allFrames: true },
-    files: ["script.js"],
-  });
+chrome.action.onClicked.addListener(async (tab) => {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id, allFrames: true },
+      files: ["script.js"],
+    });
+  } catch (err) {
+    console.error("executeScript error:", err);
+  }
 });
 
 chrome.runtime.onInstalled.addListener(async () => {
+  await setupContextMenu();
   const { autoPip } = await chrome.storage.local.get({ autoPip: true });
-  chrome.contextMenus.create({
-    id: "autoPip",
-    contexts: ["action"],
-    title: "Automatic picture-in-picture (BETA)",
-    type: "checkbox",
-    checked: autoPip,
-  });
-  updateContentScripts(autoPip);
+  await safeUpdateContentScripts(autoPip);
 });
 
 chrome.runtime.onStartup.addListener(async () => {
-  const { autoPip } = await chrome.storage.local.get({ autoPip: true });
   chrome.action.setBadgeBackgroundColor({ color: "#4285F4" });
   chrome.action.setBadgeTextColor({ color: "#fff" });
-  updateContentScripts(autoPip);
+
+  const { autoPip } = await chrome.storage.local.get({ autoPip: true });
+  await safeUpdateContentScripts(autoPip);
 });
 
-chrome.contextMenus.onClicked.addListener(({ checked: autoPip }) => {
-  chrome.storage.local.set({ autoPip });
-  updateContentScripts(autoPip);
+chrome.contextMenus.onClicked.addListener(async ({ checked }) => {
+  await chrome.storage.local.set({ autoPip: checked });
+  await safeUpdateContentScripts(checked);
 });
 
-function updateContentScripts(autoPip) {
-  chrome.action.setTitle({title: `Automatic picture-in-picture (${autoPip ? "on" : "off"})`});
-  chrome.action.setBadgeText({ text: autoPip ? "★" : "" });
-  if (!autoPip) {
-    chrome.scripting.unregisterContentScripts({ ids: ["autoPip"] });
-    return;
+async function setupContextMenu() {
+  return new Promise((resolve) => {
+    chrome.contextMenus.remove("autoPip", () => {
+      chrome.contextMenus.create({
+        id: "autoPip",
+        contexts: ["action"],
+        title: "Automatic picture-in-picture (BETA)",
+        type: "checkbox",
+        checked: true,
+      });
+      resolve();
+    });
+  });
+}
+
+async function safeUpdateContentScripts(autoPip) {
+  if (isUpdating) return;
+  isUpdating = true;
+
+  try {
+    chrome.action.setTitle({
+      title: `Automatic picture-in-picture (${autoPip ? "on" : "off"})`,
+    });
+
+    chrome.action.setBadgeText({ text: autoPip ? "★" : "" });
+
+    // 🔥 luôn unregister trước để tránh duplicate
+    await chrome.scripting.unregisterContentScripts({
+      ids: ["autoPip"],
+    }).catch(() => {});
+
+    if (!autoPip) return;
+
+    await chrome.scripting.registerContentScripts([
+      {
+        id: "autoPip",
+        js: ["autoPip.js"],
+        matches: ["<all_urls>"],
+        runAt: "document_start",
+      },
+    ]);
+  } catch (err) {
+    console.error("updateContentScripts error:", err);
+  } finally {
+    isUpdating = false;
   }
-  chrome.scripting.registerContentScripts([{
-    id: "autoPip",
-    js: ["autoPip.js"],
-    matches: ["<all_urls>"],
-    runAt: "document_start"
-  }])
 }
