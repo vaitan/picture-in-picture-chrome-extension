@@ -33,14 +33,28 @@ chrome.contextMenus.onClicked.addListener(async ({ checked }) => {
 async function setupContextMenu() {
   return new Promise((resolve) => {
     chrome.contextMenus.remove("autoPip", () => {
+      const removeError = chrome.runtime.lastError;
+      if (
+        removeError &&
+        !removeError.message.includes("Cannot find menu item with id autoPip")
+      ) {
+        console.warn("contextMenus.remove error:", removeError.message);
+      }
+
       chrome.contextMenus.create({
         id: "autoPip",
         contexts: ["action"],
         title: "Automatic picture-in-picture (BETA)",
         type: "checkbox",
         checked: true,
+      }, () => {
+        const createError = chrome.runtime.lastError;
+        if (createError) {
+          console.error("contextMenus.create error:", createError.message);
+        }
+
+        resolve();
       });
-      resolve();
     });
   });
 }
